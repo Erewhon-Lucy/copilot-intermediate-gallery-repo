@@ -47,6 +47,32 @@ The hook has two modes:
 
 ## Installation
 
+For this repository, the active configuration is `../hooks.json`, directly under
+`.github/hooks/`. Keep only one configuration for this hook. The Windows command
+uses `pwsh -NoProfile -File` and requires PowerShell 7 or later; `chmod` is not
+needed on Windows.
+
+The PowerShell implementation accepts Copilot `toolName`/`toolArgs` events and
+VS Code Local `tool_name`/`tool_input` events, including common file-edit and
+patch tools. Hook execution checks only the supplied files, does not modify them,
+does not launch Copilot CLI, and returns a JSON report in the format appropriate
+to the input event. Unrecognized tools or missing paths are skipped. The Bash
+implementation has not received these compatibility updates.
+
+To verify the Windows implementation without network requests:
+
+```powershell
+pwsh -NoProfile -File .github/hooks/fix-broken-links/link-fix.Tests.ps1
+```
+
+To try automatic execution, confirm the configuration is listed by `/hooks`,
+then ask Copilot in an Agent session to create a Markdown file containing
+`[Click here](https://example.com/this-page-does-not-exist-hook-demo)` using a
+file-editing tool, without manually running this script. The hook reports link
+and anchor-text issues to the agent; it does not display an interactive menu.
+Inspect hook diagnostics if no report appears. Hook checks are capped at 50 URLs
+per file, and the host's configured 120-second timeout still applies.
+
 1. Copy the hook folder to your repository:
 
    ```bash

@@ -47,11 +47,35 @@ if ($ScriptArgs.Count -eq 0 -and [Console]::IsInputRedirected) {
       $json = $raw | ConvertFrom-Json
       $tool = $json.toolName; if (-not $tool) { $tool = $json.tool_name }
       if ($tool) {
-        if ($tool -in 'editFiles','edit','write','str_replace_editor','create_file','multiEdit','applyPatch') {
-          # Only the files this edit tool just changed - never a wider repo scan.
-          $hookFiles = $json.tool_input.files; if (-not $hookFiles) { $hookFiles = $json.toolInput.files }
-          if (-not $hookFiles) { $hookFiles = $json.tool_input.path; if (-not $hookFiles) { $hookFiles = $json.toolInput.path } }
-          if ($hookFiles) { foreach ($hf in $hookFiles) { [void]$ScriptArgs.Add([string]$hf) } }
+        $tool = $tool -replace '^.*[./]', ''
+        if ($tool -in 'editFiles','edit','write','create','str_replace_editor','create_file','multiEdit','applyPatch','apply_patch','replace_string_in_file','multi_replace_string_in_file','insert_edit_into_file') {
+          $toolArguments = $json.toolArgs
+          if ($null -eq $toolArguments) { $toolArguments = $json.tool_input }
+          if ($null -eq $toolArguments) { $toolArguments = $json.toolInput }
+          if ($toolArguments -is [string] -and ($tool -notin 'applyPatch','apply_patch' -or $toolArguments.TrimStart().StartsWith('{'))) {
+            $toolArguments = $toolArguments | ConvertFrom-Json -ErrorAction Stop
+          }
+          $entries = @($toolArguments) + @($toolArguments.files) + @($toolArguments.replacements) + @($toolArguments.edits)
+          foreach ($entry in $entries) {
+            if ($null -eq $entry) { continue }
+            if ($entry -is [string]) {
+              if ($tool -notin 'applyPatch','apply_patch') { [void]$ScriptArgs.Add($entry) }
+              continue
+            }
+            foreach ($property in 'path','filePath','file_path') {
+              if ($entry.$property -is [string]) { [void]$ScriptArgs.Add($entry.$property) }
+            }
+          }
+          if ($tool -in 'applyPatch','apply_patch') {
+            $patch = $toolArguments
+            if ($patch -isnot [string]) { $patch = $toolArguments.input; if (-not $patch) { $patch = $toolArguments.patch } }
+            foreach ($match in [regex]::Matches([string]$patch, '(?m)^\*\*\* (?:Add File|Update File|Move to):[ \t]*(.+?)\r?$')) {
+              [void]$ScriptArgs.Add($match.Groups[1].Value)
+            }
+          }
+          if ($json.cwd -and (Test-Path -LiteralPath $json.cwd -PathType Container)) {
+            Set-Location -LiteralPath $json.cwd
+          }
         }
         else {
           # Different tool (bash, read, etc.) - nothing to check
@@ -59,7 +83,11 @@ if ($ScriptArgs.Count -eq 0 -and [Console]::IsInputRedirected) {
         }
       }
       # No tool context - called manually with piped input, fall through
-    } catch { }
+    } catch {
+      $ScriptArgs.Clear()
+      [Console]::Error.WriteLine('fix-broken-links: could not parse hook input; skipped.')
+      exit 0
+    }
   }
 }
 
@@ -280,12 +308,38 @@ foreach ($f in (Get-InputFiles)) {
   if (-not (Test-Path -LiteralPath $f -PathType Leaf)) { continue }
   if ($f -match '[\\/](node_modules|\.git|dist|build)[\\/]') { continue }
   if ($f -notmatch $WEB_RE) { continue }
+  if ($IsHook) { $f = (Resolve-Path -LiteralPath $f).Path }
   if ($seenFiles.ContainsKey($f)) { continue }
   $seenFiles[$f] = $true
   [void]$FILES.Add($f)
 }
 
 if ($FILES.Count -eq 0) { exit 0 }
+
+if ($IsHook) {
+  $report = [System.Collections.Generic.List[string]]::new()
+  [void]$report.Add('fix-broken-links: checked edited files (report only).')
+  foreach ($file in $FILES) {
+    [void]$report.Add("File: $file")
+    foreach ($issue in (Get-SeoIssues $file)) {
+      [void]$report.Add("SEO: ${file}: $issue")
+    }
+    $urls = @(Get-Urls $file)
+    foreach ($url in ($urls | Select-Object -First $LIMIT)) {
+      $status = Get-HttpStatus $url
+      if ($status -ne '200') { [void]$report.Add("BROKEN ($status): $url") }
+    }
+    if ($urls.Count -gt $LIMIT) { [void]$report.Add("Stopped after $LIMIT links in $file.") }
+  }
+  $reportText = $report -join "`n"
+  if ($json.PSObject.Properties.Name -contains 'tool_name') {
+    @{ hookSpecificOutput = @{ hookEventName = 'PostToolUse'; additionalContext = $reportText } } |
+      ConvertTo-Json -Depth 4 -Compress
+  } else {
+    @{ additionalContext = $reportText } | ConvertTo-Json -Compress
+  }
+  exit 0
+}
 
 # ── Scan ──────────────────────────────────────────────────────────────────────
 
