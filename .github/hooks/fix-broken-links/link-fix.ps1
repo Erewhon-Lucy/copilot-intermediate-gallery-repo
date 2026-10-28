@@ -333,7 +333,11 @@ if ($IsHook) {
   }
   $reportText = $report -join "`n"
   if ($json.PSObject.Properties.Name -contains 'tool_name') {
-    @{ hookSpecificOutput = @{ hookEventName = 'PostToolUse'; additionalContext = $reportText } } |
+    $hookOutput = @{ hookSpecificOutput = @{ hookEventName = 'PostToolUse'; additionalContext = $reportText } }
+    if ($report | Where-Object { $_ -match '^(BROKEN|SEO):|^BROKEN \(' }) {
+      $hookOutput.systemMessage = $reportText
+    }
+    $hookOutput |
       ConvertTo-Json -Depth 4 -Compress
   } else {
     @{ additionalContext = $reportText } | ConvertTo-Json -Compress
