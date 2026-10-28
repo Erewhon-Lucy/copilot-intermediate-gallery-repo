@@ -207,3 +207,9 @@ function StatsSection({ stats }) {
   );
 }
 ```
+
+## Downloading Gallery Photos
+
+The download button in `GalleryGrid` fetches the selected photo's `url`, checks that the response is successful and contains image data, then starts a browser download using a sanitized version of the photo title and the image's format. Each photo reports its own loading or error state; a failed download can be retried from that photo's download button. Download counts are not incremented because starting a browser download does not confirm that the file was saved.
+
+The mock photo URLs currently point to `/placeholder-*.jpg`, but those assets are not included. Add the image files under `public/` and keep each `Photo.url` in `src/lib/mock-photo-data.ts` in sync to enable successful downloads. For remote images, the host must allow browser `fetch` requests from this application's origin with appropriate CORS headers. Missing assets, HTTP errors, and network or CORS failures are shown in the gallery; the application does not proxy remote URLs through a server.
